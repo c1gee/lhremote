@@ -242,6 +242,45 @@ describe("LauncherService", () => {
       );
     });
 
+    it("passes a numeric workspaceId, workspace ownerUid, and never starts campaigns", async () => {
+      await service.connect();
+      nextEvaluateResult = { success: true };
+
+      await service.startInstance(42);
+
+      const startCall = mockEvaluate.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("mainWindow.startInstance"),
+      );
+      const snippet = String(startCall?.[0]);
+      expect(snippet).toContain("account.workspaceId");
+      expect(snippet).toContain("account.license?.workspaceId");
+      expect(snippet).toContain('typeof workspaceId !== \'number\'');
+      expect(snippet).toContain('"workspaceId" must be a number');
+      expect(snippet).toContain("workspaceId: workspaceId");
+      expect(snippet).toContain("'lh2:workspace:' + licenseWorkspaceId");
+      expect(snippet).not.toContain("'lh2:workspace:' + rawWorkspaceId");
+      expect(snippet).toContain("shouldStartRunningCampaigns: false");
+      expect(snippet).not.toContain("shouldStartRunningCampaigns: true");
+      expect(snippet).toContain("builtBy: 'lhremote'");
+      expect(snippet).toContain("liAccessLevel: account.workspaceAccess?.level");
+    });
+
+    it("embeds factory-source filtering and the userId cache gate", async () => {
+      await service.connect();
+      nextEvaluateResult = { success: true };
+
+      await service.startInstance(42);
+
+      const startCall = mockEvaluate.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("mainWindow.startInstance"),
+      );
+      const snippet = String(startCall?.[0]);
+      expect(snippet).toContain("_FACTORY_NEEDLES");
+      expect(snippet).toContain("Function.prototype.toString.call");
+      expect(snippet).toContain("_cached.auth && _cached.auth.userId");
+      expect(snippet).toContain("window.__lhrServices = undefined");
+    });
+
     it("throws StartInstanceError on failure", async () => {
       await service.connect();
       nextEvaluateResult = {

@@ -4,8 +4,12 @@
 import { AppService, errorMessage } from "@lhremote/core";
 
 /** Handle the {@link https://github.com/alexey-pelykh/lhremote#app-management | launch-app} CLI command. */
-export async function handleLaunchApp(): Promise<void> {
-  const app = new AppService();
+export async function handleLaunchApp(
+  options: { force?: boolean } = {},
+): Promise<void> {
+  const app = options.force
+    ? new AppService(undefined, { force: true })
+    : new AppService();
 
   try {
     await app.launch();

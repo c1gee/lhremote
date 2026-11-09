@@ -23,9 +23,13 @@ describe("Instance types", () => {
       zoomDefault: 1,
       shouldBringToFront: false,
       shouldStartRunningCampaigns: false,
+      workspaceId: 20338,
+      builtBy: "lhremote",
+      liAccessLevel: "owner",
     };
 
     expect(params.instanceId).toBe(42);
+    expect(params.workspaceId).toBe(20338);
     expect(params.linkedInAccount.liId).toBe(100);
     expect(params.proxy).toBeNull();
   });

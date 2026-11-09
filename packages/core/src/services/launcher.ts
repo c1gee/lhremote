@@ -20,6 +20,7 @@ import {
   StartInstanceError,
   WrongPortError,
 } from "./errors.js";
+import { LH_SERVICES_INIT } from "./lh-services-init.js";
 
 /**
  * Controls the LinkedHelper launcher process via CDP.
@@ -29,95 +30,6 @@ import {
  * methods to start/stop instances and query accounts.
  */
 export class LauncherService {
-  /**
-   * CDP snippet that resolves LinkedHelper frontend service singletons
-   * via the webpack module registry and exposes them on `lhSvc`.
-   *
-   * The snippet is designed to be cache-aware: the first invocation
-   * per page navigation performs a marker-based scan of the webpack
-   * module registry and stashes the resolved services on
-   * `window.__lhrServices`. Subsequent invocations read from the cache.
-   *
-   * **Why marker-based?** Webpack module IDs are not stable across
-   * LinkedHelper releases. Between v2.113.11 and v2.113.28, three of
-   * the four service modules we depend on shifted IDs. The only
-   * reliable way to locate services is to scan for module exports
-   * with characteristic fields (e.g. `_workspacesBS` for the workspace
-   * service). See `research/linkedhelper/architecture/V2113-WEBPACK-MODULE-IDS.md`.
-   *
-   * Each resolved service is exposed under a dotless alias for quick
-   * access in subsequent expressions:
-   *
-   * - `lhSvc.auth` — authService (userId, role, isLoggedIn)
-   * - `lhSvc.user` — userService (currentUserBS, fetchUser)
-   * - `lhSvc.runningLi` — runningLiAccountsService
-   *   (extendedLinkedInAccountsBS, getLinkedInAccount, startLinkedInAccountLocal)
-   * - `lhSvc.feSettings` — frontendSettingsService (getFrontendSettings, _cacheBS)
-   * - `lhSvc.workspace` — workspaceService
-   *   (_workspacesBS, _selectedWorkspaceBS, api, refreshWorkspaces); may be
-   *   `null` on LinkedHelper versions that predate workspaces
-   *
-   * Callers must check `lhSvc` for null and handle the failure case.
-   */
-  private static readonly LH_SERVICES_INIT = `
-    const _wpDeadline = Date.now() + 15000;
-    while (!window.webpackChunk_linked_helper_front && Date.now() < _wpDeadline) {
-      await new Promise(r => setTimeout(r, 250));
-    }
-    let lhSvc = null;
-    if (window.__lhrServices) {
-      lhSvc = window.__lhrServices;
-    } else if (window.webpackChunk_linked_helper_front) {
-      let _wpReq = null;
-      window.webpackChunk_linked_helper_front.push(
-        [[Symbol()], {}, (req) => { _wpReq = req; }]
-      );
-      if (_wpReq) {
-        const _specs = {
-          auth:        { exportKey: 'authService',              markers: ['userId', 'role'] },
-          user:        { exportKey: 'default',                  markers: ['currentUserBS', 'fetchUser'] },
-          runningLi:   { exportKey: 'runningLiAccountsService', markers: ['extendedLinkedInAccountsBS', 'getLinkedInAccount'] },
-          feSettings:  { exportKey: 'frontendSettingsService',  markers: ['getFrontendSettings', '_cacheBS'] },
-          workspace:   { exportKey: 'A',                        markers: ['_workspacesBS', '_selectedWorkspaceBS'] },
-        };
-        const _resolved = {};
-        for (const _id of Object.keys(_wpReq.m || {})) {
-          let _mod;
-          try { _mod = _wpReq(_id); } catch (_e) { continue; }
-          if (!_mod) continue;
-          for (const _name of Object.keys(_specs)) {
-            if (_resolved[_name]) continue;
-            const _spec = _specs[_name];
-            const _v = _mod[_spec.exportKey];
-            if (_v && typeof _v === 'object' && _spec.markers.every(m => m in _v)) {
-              _resolved[_name] = _v;
-              continue;
-            }
-            for (const _k of Object.keys(_mod)) {
-              const _w = _mod[_k];
-              if (!_w || typeof _w !== 'object') continue;
-              if (_spec.markers.every(m => m in _w)) {
-                _resolved[_name] = _w;
-                break;
-              }
-            }
-          }
-          if (Object.keys(_resolved).length === Object.keys(_specs).length) break;
-        }
-        if (_resolved.auth && _resolved.user && _resolved.runningLi && _resolved.feSettings) {
-          // workspace may legitimately be missing on pre-2.113.x launchers
-          lhSvc = {
-            auth: _resolved.auth,
-            user: _resolved.user,
-            runningLi: _resolved.runningLi,
-            feSettings: _resolved.feSettings,
-            workspace: _resolved.workspace || null,
-          };
-          window.__lhrServices = lhSvc;
-        }
-      }
-    }`;
-
   private readonly port: number;
   private readonly host: string;
   private readonly allowRemote: boolean;
@@ -217,7 +129,7 @@ export class LauncherService {
           const remote = require('@electron/remote');
           const mainWindow = remote.getGlobal('mainWindow');
 
-          ${LauncherService.LH_SERVICES_INIT}
+          ${LH_SERVICES_INIT}
           if (!lhSvc) {
             return { success: false, error: 'LinkedHelper frontend services not available (webpack registry empty or core services missing)' };
           }
@@ -265,13 +177,27 @@ export class LauncherService {
           // 4. Fetch frontend settings
           const frontendSettings = await feSettingsSvc.getFrontendSettings();
 
+          // 4a. LinkedHelper 2.113+ requires a numeric top-level workspaceId.
+          //     The lh2:workspace: URN belongs on license.ownerUid, not here.
+          const workspaceId = account.workspaceId
+            ?? account.license?.workspaceId
+            ?? lhSvc.workspace?._selectedWorkspaceBS?.value?.id;
+          if (typeof workspaceId !== 'number' || !Number.isFinite(workspaceId)) {
+            return { success: false, error: '"workspaceId" must be a number (account.workspaceId, account.license.workspaceId, or the selected workspace). Got: ' + String(workspaceId) };
+          }
+
           // 5. Transform the license
           let license = null;
           if (account.license) {
             const lic = account.license;
-            const ownerUid = lic.organizationId
-              ? 'lh2:org:' + lic.organizationId
-              : 'lh2:user:' + (lic.userId ?? userId);
+            const licenseWorkspaceId = typeof lic.workspaceId === 'number'
+              ? lic.workspaceId
+              : workspaceId;
+            const ownerUid = typeof licenseWorkspaceId === 'number'
+              ? 'lh2:workspace:' + licenseWorkspaceId
+              : lic.organizationId
+                ? 'lh2:org:' + lic.organizationId
+                : 'lh2:user:' + (lic.userId ?? userId);
             license = {
               id: lic.id,
               ownerUid: ownerUid,
@@ -300,6 +226,9 @@ export class LauncherService {
             zoomDefault: 0.9,
             shouldBringToFront: true,
             shouldStartRunningCampaigns: false,
+            workspaceId: workspaceId,
+            builtBy: 'lhremote',
+            liAccessLevel: account.workspaceAccess?.level,
           });
           return { success: true };
         } catch (e) {
@@ -382,7 +311,7 @@ export class LauncherService {
     const accounts = await this.launcherEvaluate<Account[] | null>(
       client,
       `(async () => {
-        ${LauncherService.LH_SERVICES_INIT}
+        ${LH_SERVICES_INIT}
         if (!lhSvc) return null;
 
         const svc = lhSvc.runningLi;
@@ -484,7 +413,7 @@ export class LauncherService {
     const workspaces = await this.launcherEvaluate<Workspace[] | null>(
       client,
       `(async () => {
-        ${LauncherService.LH_SERVICES_INIT}
+        ${LH_SERVICES_INIT}
         if (!lhSvc) return null;
         const wsSvc = lhSvc.workspace;
         if (!wsSvc) return [];
