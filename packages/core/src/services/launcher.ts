@@ -177,26 +177,27 @@ export class LauncherService {
           // 4. Fetch frontend settings
           const frontendSettings = await feSettingsSvc.getFrontendSettings();
 
-          // 4a. Workspace identity for LinkedHelper 2.113+.
-          //     The launcher expects the URN form (lh2:workspace:<id>),
-          //     matching the lh2:user: / lh2:org: license ownerUids.
-          const rawWorkspaceId = account.workspaceId
-            ?? lhSvc.workspace?._selectedWorkspaceBS?.value?.id
-            ?? frontendSettings?.selectedWorkspaceId
-            ?? null;
-          const workspaceId = rawWorkspaceId == null
-            ? undefined
-            : (String(rawWorkspaceId).indexOf('lh2:workspace:') === 0
-                ? String(rawWorkspaceId)
-                : 'lh2:workspace:' + rawWorkspaceId);
+          // 4a. LinkedHelper 2.113+ requires a numeric top-level workspaceId.
+          //     The lh2:workspace: URN belongs on license.ownerUid, not here.
+          const workspaceId = account.workspaceId
+            ?? account.license?.workspaceId
+            ?? lhSvc.workspace?._selectedWorkspaceBS?.value?.id;
+          if (typeof workspaceId !== 'number' || !Number.isFinite(workspaceId)) {
+            return { success: false, error: '"workspaceId" must be a number (account.workspaceId, account.license.workspaceId, or the selected workspace). Got: ' + String(workspaceId) };
+          }
 
           // 5. Transform the license
           let license = null;
           if (account.license) {
             const lic = account.license;
-            const ownerUid = lic.organizationId
-              ? 'lh2:org:' + lic.organizationId
-              : 'lh2:user:' + (lic.userId ?? userId);
+            const licenseWorkspaceId = typeof lic.workspaceId === 'number'
+              ? lic.workspaceId
+              : workspaceId;
+            const ownerUid = typeof licenseWorkspaceId === 'number'
+              ? 'lh2:workspace:' + licenseWorkspaceId
+              : lic.organizationId
+                ? 'lh2:org:' + lic.organizationId
+                : 'lh2:user:' + (lic.userId ?? userId);
             license = {
               id: lic.id,
               ownerUid: ownerUid,
@@ -226,6 +227,8 @@ export class LauncherService {
             shouldBringToFront: true,
             shouldStartRunningCampaigns: false,
             workspaceId: workspaceId,
+            builtBy: 'lhremote',
+            liAccessLevel: account.workspaceAccess?.level,
           });
           return { success: true };
         } catch (e) {

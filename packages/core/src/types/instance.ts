@@ -20,8 +20,10 @@ export interface StartInstanceParams {
   zoomDefault: number;
   shouldBringToFront: boolean;
   shouldStartRunningCampaigns: boolean;
-  /** LinkedHelper 2.113+ workspace URN (`lh2:workspace:<id>`). */
-  workspaceId?: string | undefined;
+  /** LinkedHelper 2.113+ numeric workspace id. The `lh2:workspace:` URN belongs on `license.ownerUid`. */
+  workspaceId?: number | undefined;
+  builtBy?: string | undefined;
+  liAccessLevel?: string | undefined;
 }
 
 export interface StartInstanceResult {
