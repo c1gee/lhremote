@@ -23,9 +23,11 @@ describe("Instance types", () => {
       zoomDefault: 1,
       shouldBringToFront: false,
       shouldStartRunningCampaigns: false,
+      workspaceId: "lh2:workspace:20338",
     };
 
     expect(params.instanceId).toBe(42);
+    expect(params.workspaceId).toBe("lh2:workspace:20338");
     expect(params.linkedInAccount.liId).toBe(100);
     expect(params.proxy).toBeNull();
   });

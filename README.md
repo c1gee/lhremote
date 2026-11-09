@@ -95,7 +95,7 @@ The `lhremote` command provides the same functionality as the MCP server. Every 
 
 ```sh
 lhremote find-app [--json]
-lhremote launch-app
+lhremote launch-app [--force]
 lhremote quit-app
 ```
 

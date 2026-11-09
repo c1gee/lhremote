@@ -242,6 +242,37 @@ describe("LauncherService", () => {
       );
     });
 
+    it("passes the 2.113+ workspaceId URN and never starts campaigns", async () => {
+      await service.connect();
+      nextEvaluateResult = { success: true };
+
+      await service.startInstance(42);
+
+      const startCall = mockEvaluate.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("mainWindow.startInstance"),
+      );
+      expect(startCall?.[0]).toContain("lh2:workspace:");
+      expect(startCall?.[0]).toContain("workspaceId: workspaceId");
+      expect(startCall?.[0]).toContain("shouldStartRunningCampaigns: false");
+      expect(startCall?.[0]).not.toContain("shouldStartRunningCampaigns: true");
+    });
+
+    it("embeds factory-source filtering and the userId cache gate", async () => {
+      await service.connect();
+      nextEvaluateResult = { success: true };
+
+      await service.startInstance(42);
+
+      const startCall = mockEvaluate.mock.calls.find(
+        (c) => typeof c[0] === "string" && c[0].includes("mainWindow.startInstance"),
+      );
+      const snippet = String(startCall?.[0]);
+      expect(snippet).toContain("_FACTORY_NEEDLES");
+      expect(snippet).toContain("Function.prototype.toString.call");
+      expect(snippet).toContain("_cached.auth && _cached.auth.userId");
+      expect(snippet).toContain("window.__lhrServices = undefined");
+    });
+
     it("throws StartInstanceError on failure", async () => {
       await service.connect();
       nextEvaluateResult = {
